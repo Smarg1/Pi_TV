@@ -23,6 +23,7 @@ MIN_REMAINING_SECONDS = 10
 
 running = True
 
+
 def handle_signal(signum, frame):
     global running
     running = False
@@ -30,21 +31,21 @@ def handle_signal(signum, frame):
 
 def find_videos() -> list[Path]:
     if not VIDEO_DIR.is_dir():
-        print(f"Video directory does not exist: {VIDEO_DIR}", file=sys.stderr)
+        print(
+            f"Video directory does not exist: {VIDEO_DIR}",
+            file=sys.stderr,
+        )
         return []
 
-    videos = [
+    return sorted(
         path
         for path in VIDEO_DIR.iterdir()
-        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
-    ]
-
-    return sorted(videos)
+        if path.is_file()
+        and path.suffix.lower() in VIDEO_EXTENSIONS
+    )
 
 
 def get_duration(video: Path) -> float:
-    """Get the duration of a video using ffprobe."""
-
     command = [
         "ffprobe",
         "-v",
@@ -71,13 +72,14 @@ def get_duration(video: Path) -> float:
         ValueError,
         FileNotFoundError,
     ) as exc:
-        print(f"Could not determine duration of {video}: {exc}")
+        print(
+            f"Could not determine duration of {video}: {exc}",
+            file=sys.stderr,
+        )
         return 0.0
 
 
-def choose_start_time(duration: float) -> float:
-    """Choose a random point in the video to start from."""
-
+def get_random_start(duration: float) -> float:
     if duration <= MIN_REMAINING_SECONDS:
         return 0.0
 
@@ -87,16 +89,14 @@ def choose_start_time(duration: float) -> float:
     )
 
 
-def play_video(video: Path, start_time: float) -> None:
+def play_video(video: Path, start_time: float = 0.0) -> None:
     print(
-        f"Playing {video.name} "
+        f"Playing: {video.name} "
         f"from {start_time:.1f}s"
     )
 
     command = [
         "mpv",
-        "--vo=gpu",
-        "--gpu-context=drm",
         "--fs",
         "--no-border",
         "--no-osd",
@@ -104,8 +104,8 @@ def play_video(video: Path, start_time: float) -> None:
         "--really-quiet",
         "--hwdec=auto",
         "--video-sync=display-resample",
-        f"--start={start_time}",
         "--keep-open=no",
+        f"--start={start_time}",
         str(video),
     ]
 
@@ -114,14 +114,15 @@ def play_video(video: Path, start_time: float) -> None:
 
     except FileNotFoundError:
         print(
-            "mpv was not found. Install it with: "
-            "sudo apt install mpv",
+            "mpv is not installed.",
             file=sys.stderr,
         )
         sys.exit(1)
 
 
 def main() -> None:
+    global running
+
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
@@ -136,9 +137,26 @@ def main() -> None:
 
     print(f"Found {len(videos)} videos.")
 
-    current_video: Path | None = None
+    current_video = random.choice(videos)
+
+    duration = get_duration(current_video)
+
+    if duration <= 0:
+        print(
+            f"Unable to play {current_video}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    random_start = get_random_start(duration)
+
+    play_video(
+        current_video,
+        random_start,
+    )
 
     while running:
+
         available_videos = [
             video
             for video in videos
@@ -148,22 +166,13 @@ def main() -> None:
         if not available_videos:
             available_videos = videos
 
-        current_video = random.choice(available_videos)
-
-        duration = get_duration(current_video)
-
-        if duration <= 0:
-            print(
-                f"Skipping {current_video}: "
-                "could not determine duration."
-            )
-            continue
-
-        start_time = choose_start_time(duration)
+        current_video = random.choice(
+            available_videos
+        )
 
         play_video(
             current_video,
-            start_time,
+            0.0,
         )
 
     print("TV player stopped.")
